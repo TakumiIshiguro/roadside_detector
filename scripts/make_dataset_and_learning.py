@@ -35,7 +35,7 @@ class roadside_detector:
     
         self.inter_flg = False
         self.ignore_flg = False    
-        self.learning_flg = True
+        self.learning_flg = False
         self.loop_srv = rospy.Service('/loop_count', SetBool, self.callback_loop_count)
         self.loop_count_flg = False
 

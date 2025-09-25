@@ -17,7 +17,7 @@ class roadside_detector:
         self.bridge = CvBridge()
 
         # --- 新しい Publisher (Int32) ---
-        self.class_pub = rospy.Publisher("intersection_class", Int32, queue_size=1)
+        self.class_pub = rospy.Publisher("inter_cls", Int32, queue_size=1)
 
         self.image_sub = rospy.Subscriber("/camera_center/usb_cam/image_raw", Image, self.callback)
         self.dl = deep_learning()

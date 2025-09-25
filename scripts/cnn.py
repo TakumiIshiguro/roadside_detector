@@ -120,7 +120,7 @@ class deep_learning:
         self.x_list.append(x)
         self.t_list.append(t)
 
-        print(f"appended -> total {len(self.x_list)} samples (not yet concatenated)")
+        print(f"total {len(self.x_list)} samples")
         return len(self.x_list)
 
     def finalize_dataset(self):
