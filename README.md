@@ -12,6 +12,24 @@ Subscriptions:
  * /camera_center/usb_cam/image_raw [sensor_msgs/Image]
 ```
 
+### 使用可能なネットワーク
+- mobilenet_v3_large
+- resnet18
+- resnet50
+- vit_b_16  
+```
+class deep_learning:
+    def __init__(self, n_out: int = 2):
+        # device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print("device:", self.device)
+
+        backbone = "mobilenet_v3_large"     ###ここでネットワークを指定
+        # backbone = "resnet18"     ###
+        # backbone = "resnet50"     ###
+        # backbone = "vit_b16"      ###
+        self.net = build_model(backbone, n_out=n_out).to(self.device)
+```
 ## インストール方法
 - todo
 

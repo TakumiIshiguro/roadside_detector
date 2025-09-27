@@ -8,77 +8,103 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torchvision.models import resnet18, ResNet18_Weights
-# =========================
-# HYPER PARAM
-# =========================
+from torchvision.models import (
+    mobilenet_v3_large, MobileNet_V3_Large_Weights,
+    resnet18, ResNet18_Weights,
+    resnet50, ResNet50_Weights,
+    vit_b_16, ViT_B_16_Weights,
+)
+
 BATCH_SIZE = 64
 EPOCH_NUM = 10
 
-class ResNetClassifier(nn.Module):
-    def __init__(self, n_out: int, arch: str = "resnet18",
-                 pretrained: bool = True,
-                 normalize_imagenet: bool = True):
+class BackboneWrapper(nn.Module):
+    def __init__(self, backbone: nn.Module, out_dim: int, n_out: int):
         """
-        n_out: クラス数
-        arch: いまは 'resnet18' 前提（必要なら分岐でresnet34/50等に拡張可）
-        pretrained: ImageNet学習済み重みを使うか
-        normalize_imagenet: 入力をImageNet統計で正規化するか（推奨: True）
+        backbone: 特徴抽出部 (nn.Module)
+        out_dim : 特徴ベクトル次元数
+        n_out   : 出力クラス数
         """
         super().__init__()
-        self.normalize_imagenet = normalize_imagenet
+        self.backbone = backbone
+        self.classifier = nn.Linear(out_dim, n_out)
 
-        # 学習済み重みの取得（オフライン環境なら pretrained=False に）
-        weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
-        base = resnet18(weights=weights)
-
-        # 最終fc直前までをbackboneとして使用（conv1..avgpool まで）
-        self.backbone = nn.Sequential(*list(base.children())[:-1])  # [B,512,1,1]
-        in_feat = base.fc.in_features  # resnet18は512
-
-        # 分類ヘッド
-        self.classifier = nn.Linear(in_feat, n_out)
-
-        # ImageNet正規化用パラメータ（学習・推論の両方で使用）
-        # register_bufferで学習対象外に固定
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std  = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        # ImageNet 正規化
+        mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
+        std  = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
         self.register_buffer("im_mean", mean)
         self.register_buffer("im_std", std)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x: [B, C, H, W], 値域は [0,1] 推奨（0-255でも動くが正規化の前に /255 を推奨）
-        return: [B, n_out]
-        """
-        if self.normalize_imagenet:
-            # 入力が0-255ならここで /255 してから正規化したい場合は下の1行を有効化
-            # x = x / 255.0
-            x = (x - self.im_mean) / self.im_std
+    def forward(self, x):
+        # 入力は [0,1] 前提（0-255 の場合は事前に /255.0 してください）
+        x = (x - self.im_mean) / self.im_std
 
-        feat = self.backbone(x)       # [B,512,1,1]
-        feat = torch.flatten(feat, 1)  # [B,512]
-        logits = self.classifier(feat) # [B,n_out]
+        feat = self.backbone(x)               # [B,out_dim] or [B,out_dim,1,1]
+        logits = self.classifier(feat)        # [B,n_out]
         return logits
 
-# =========================
-# 学習クラス（時系列なし）
-# =========================
+from torchvision.models import (
+    mobilenet_v3_large, MobileNet_V3_Large_Weights,
+    resnet18, ResNet18_Weights,
+    resnet50, ResNet50_Weights,
+    vit_b_16, ViT_B_16_Weights,
+)
+
+def build_model(name: str, n_out: int = 2) -> nn.Module:
+    """
+    利用可:
+      "mobilenet_v3_large", "resnet18", "resnet50", "vit_b16"
+    いずれも最終分類層を Identity に置換し、直前の特徴ベクトルを BackboneWrapper に渡す
+    """
+    key = name.lower()
+
+    if key in ("mobilenet_v3_large", "mobilenetv3large", "mnetv3l"):
+        weights = MobileNet_V3_Large_Weights.IMAGENET1K_V1
+        base = mobilenet_v3_large(weights=weights)
+        # classifier: [Linear(960→1280), Hardswish, Dropout, Linear(1280→1000)]
+        base.classifier[-1] = nn.Identity()        # 最終Linearだけ外す
+        out_dim = base.classifier[0].out_features  # 1280
+        backbone = base                            # 出力: [B,1280]
+        return BackboneWrapper(backbone, out_dim, n_out)
+
+    elif key == "resnet18":
+        weights = ResNet18_Weights.IMAGENET1K_V1
+        base = resnet18(weights=weights)
+        out_dim = base.fc.in_features              # 512
+        base.fc = nn.Identity()                    # 最終Linearだけ外す
+        backbone = base                            # 出力: [B,512]
+        return BackboneWrapper(backbone, out_dim, n_out)
+
+    elif key == "resnet50":
+        weights = ResNet50_Weights.IMAGENET1K_V1
+        base = resnet50(weights=weights)
+        out_dim = base.fc.in_features              # 2048
+        base.fc = nn.Identity()                    # 最終Linearだけ外す
+        backbone = base                            # 出力: [B,2048]
+        return BackboneWrapper(backbone, out_dim, n_out)
+
+    elif key in ("vit_b16", "vit-b16", "vit_b_16"):
+        weights = ViT_B_16_Weights.IMAGENET1K_V1
+        base = vit_b_16(weights=weights)
+        out_dim = base.heads.head.in_features      # 768
+        base.heads.head = nn.Identity()            # 最終Linearだけ外す (LayerNormは残る)
+        backbone = base                            # 出力: [B,768]
+        return BackboneWrapper(backbone, out_dim, n_out)
+
+    else:
+        raise ValueError(f"Unknown model name: {name}")
+ 
 class deep_learning:
     def __init__(self, n_out: int = 2):
         # device
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print("device:", self.device)
 
-        # ★ ここをResNetへ変更 ★
-        #   - pretrained=True なら ImageNet重みを使用
-        #   - normalize_imagenet=True で内部でImageNet正規化
-        self.net = ResNetClassifier(
-            n_out=n_out,
-            arch="resnet18",
-            pretrained=True,            # オフライン環境/重み不要なら False
-            normalize_imagenet=True     # 可能なら True 推奨
-        ).to(self.device)
+        backbone = "mobilenet_v3_large"
+        # backbone = "resnet18"
+        # backbone = "resnet50"
+        # backbone = "vit_b16"
+        self.net = build_model(backbone, n_out=n_out).to(self.device)
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-4, eps=1e-8, weight_decay=1e-5)
         self.scheduler = CosineAnnealingLR(self.optimizer, T_max=EPOCH_NUM, eta_min=1e-6)
