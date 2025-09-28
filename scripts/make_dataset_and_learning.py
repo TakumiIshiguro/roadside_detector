@@ -48,7 +48,7 @@ class roadside_detector:
 
     def callback(self, data):
         try:
-            self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+            self.cv_image = self.bridge.imgmsg_to_cv2(data, "rgb8")
         except CvBridgeError as e:
             print(e)
 
@@ -71,19 +71,21 @@ class roadside_detector:
             print("No Image")
             return
 
-        img = resize(self.cv_image, (224, 224), mode='constant')
-        cv2.imshow("resize", img)
-        # cv2.imshow("center", self.cv_image)
-        cv2.waitKey(1)
+        img_resized = resize(self.cv_image, (224, 224), mode='constant')
+        img_for_train = img_resized.astype(np.float32)  # [224,224,3], 0–1 float32
 
+        # --- 表示用（uint8, 0–255） ---
+        img_for_display = (img_resized * 255).astype(np.uint8)  # [224,224,3], 0–255 uint8
+
+        # ラベル付けとデータ作成
         if self.inter_flg:
-            self.dl.make_dataset(img, 1)
+            self.dl.make_dataset(img_for_train, 1)
             print("label 1")
         elif self.ignore_flg:
             print("-------pass-----")
             pass
         else:
-            self.dl.make_dataset(img, 0)
+            self.dl.make_dataset(img_for_train, 0)
             print("label 0")
 
         if self.loop_count_flg:
@@ -91,7 +93,7 @@ class roadside_detector:
             self.dl.save_dataset(self.save_dataset_path, 'dataset.pt')
             self.dl.training()
             self.dl.save(self.save_model_path)
-            self.loop_count_flag = False
+            self.loop_count_flg = False
             os.system('killall roslaunch')
             sys.exit()
 
@@ -100,6 +102,11 @@ class roadside_detector:
             self.dl.training()
             self.dl.save(self.save_model_path)
             sys.exit()
+        else:
+            # 表示は BGR に変換して OpenCV ウィンドウに出す
+            bgr_img = cv2.cvtColor(img_for_display, cv2.COLOR_RGB2BGR)
+            cv2.imshow("resize", bgr_img)
+            cv2.waitKey(1)
 
 if __name__ == '__main__':
     rg = roadside_detector()

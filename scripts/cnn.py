@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
+import torchvision.transforms.v2 as Tv2
+
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision.models import (
     mobilenet_v3_large, MobileNet_V3_Large_Weights,
@@ -119,11 +121,14 @@ class deep_learning:
         torch.backends.cudnn.benchmark = False
         torch.autograd.set_detect_anomaly(True)
 
-    # -------------------------
-    # データ追加
-    # img: [H, W, C] (np or torch) / dtypeはfloat32推奨（0-255なら後段で /255 してもOK）
-    # label: int クラスID（CrossEntropyLoss 用）
-    # -------------------------
+        self.aug_trans = Tv2.Compose([
+            Tv2.ColorJitter(brightness=0.2, contrast=0.2,
+                            saturation=0.2, hue=0.02),
+            Tv2.RandomHorizontalFlip(p=0.5),
+            Tv2.RandomResizedCrop(size=(224, 224), scale=(0.8, 1.0)),
+            Tv2.RandomErasing(p=0.2, scale=(0.02, 0.08), ratio=(0.3, 3.3))
+        ])
+
     def make_dataset(self, img, label: int):
         """
         画像とラベルを一時リストにappendするだけ
@@ -133,17 +138,27 @@ class deep_learning:
         if x.dim() != 3 or x.shape[2] != 3:
             raise ValueError("img must be [H,W,3]")
 
-        # 必要なら正規化
-        # if x.max() > 1.0:
-        #     x = x / 255.0
+        # [H,W,C] → [C,H,W]
+        x = x.permute(2, 0, 1)
 
-        x = x.permute(2, 0, 1).unsqueeze(0)  # [1,C,H,W]
+        # 値域が0-255なら正規化
+        # if x.max() > 1.0:
+        #     print("0-255→0-1")
+        #     x = x / 255.0  # v2は0〜1 Tensor対応
+
+        # augmentation 適用
+        x_aug = self.aug_trans(x)   # [C,H,W]
+
+        # [1,C,H,W] に拡張
+        x_aug = x_aug.unsqueeze(0)
+
+        # ラベル
         t = torch.tensor([int(label)], dtype=torch.long)  # [1]
 
         if not hasattr(self, "x_list"):
             self.x_list, self.t_list = [], []
 
-        self.x_list.append(x)
+        self.x_list.append(x_aug)
         self.t_list.append(t)
 
         print(f"total {len(self.x_list)} samples")
